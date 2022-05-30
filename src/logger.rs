@@ -20,7 +20,7 @@ fn configure(level: &str) -> Result {
 
     #[cfg(unix)]
     let enable_ansi = true;
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "wasi"))]
     let enable_ansi = false;
 
     match tracing_subscriber::fmt()
