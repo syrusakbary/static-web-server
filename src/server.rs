@@ -2,6 +2,7 @@
 use hyper::server::conn::AddrIncoming;
 #[allow(unused_imports)]
 use hyper::server::Server as HyperServer;
+#[cfg(unix)]
 use listenfd::ListenFd;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::sync::Arc;
@@ -107,6 +108,7 @@ impl Server {
         // Determine TCP listener either file descriptor or TCP socket
         let (tcp_listener, addr_str);
         match general.fd {
+            #[cfg(unix)]
             Some(fd) => {
                 addr_str = format!("@FD({fd})");
                 tcp_listener = ListenFd::from_env()
@@ -116,6 +118,10 @@ impl Server {
                     "converted inherited file descriptor {} to a 'tcp' listener",
                     fd
                 );
+            }
+            #[cfg(not(unix))]
+            Some(fd) => {
+                panic!("Custom fd: {} not supported in non-unix systems", fd);
             }
             None => {
                 let ip = general

@@ -9,7 +9,7 @@ use std::task::{Context, Poll};
 use hyper::server::conn::AddrStream;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-pub trait Transport: AsyncRead + AsyncWrite {
+pub trait Transport {
     fn remote_addr(&self) -> Option<SocketAddr>;
 }
 
