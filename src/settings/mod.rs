@@ -1,5 +1,7 @@
+use std::path::PathBuf;
 use globset::{Glob, GlobMatcher};
 use headers::HeaderMap;
+use http::Uri;
 use hyper::StatusCode;
 use structopt::StructOpt;
 
@@ -12,6 +14,8 @@ pub mod file;
 pub use cli::Commands;
 
 use cli::General;
+
+pub const DEFAULT_CONFIG_PATH: &'static str = "./cfg/config.toml";
 
 /// The `headers` file options.
 pub struct Headers {
@@ -30,7 +34,10 @@ pub struct Rewrites {
 }
 
 /// The `Redirects` file options.
+#[derive(Debug)]
 pub struct Redirects {
+    /// Source host
+    pub host: Option<String>,
     /// Source pattern glob matcher
     pub source: GlobMatcher,
     /// A local file that must exist
@@ -57,7 +64,15 @@ pub struct Settings {
 impl Settings {
     /// Handles CLI and config file options and converging them into one.
     pub fn get() -> Result<Settings> {
-        let opts = General::from_args();
+        let mut opts = General::from_args();
+
+        // If no config file was supplied then attempt to use the default path
+        if opts.config_file.is_none() {
+            let default_config_file: PathBuf = DEFAULT_CONFIG_PATH.into();
+            if default_config_file.exists() {
+                opts.config_file = Some(default_config_file);
+            }
+        }
 
         // Define the general CLI/file options
         let mut host = opts.host;
@@ -104,9 +119,14 @@ impl Settings {
         // NOTE: All config file based options shouldn't be mandatory, therefore `Some()` wrapped
         if let Some(ref p) = opts.config_file {
             if p.is_file() {
+                #[cfg(target_family = "wasm")]
                 let path_resolved = p
                     .canonicalize()
-                    .with_context(|| "error resolving toml config file path")?;
+                    .unwrap_or(p.clone());
+                #[cfg(not(target_family = "wasm"))]
+                let path_resolved = p
+                    .canonicalize()
+                    .unwrap_or(p.clone());
 
                 let settings = file::Settings::read(&path_resolved)
                     .with_context(|| {
@@ -273,7 +293,25 @@ impl Settings {
 
                             // Compile a glob pattern for each redirect sources entry
                             for redirects_entry in redirects_entries.iter() {
-                                let source = Glob::new(&redirects_entry.source)
+                                let (host, source) =
+                                    if redirects_entry.source.starts_with("http://")
+                                        || redirects_entry.source.starts_with("https://")
+                                    {
+                                        // We get the host from the source URL
+                                        let source_uri: Uri =
+                                            redirects_entry.source.to_string().try_into()?;
+
+                                        let mut source_host =
+                                            source_uri.host().map(|host| host.to_string());
+                                        if let Some(port) = source_uri.port_u16() {
+                                            source_host =
+                                                Some(format!("{}:{}", source_host.unwrap(), port));
+                                        }
+                                        (source_host, source_uri.path().to_owned())
+                                    } else {
+                                        (None, redirects_entry.source.to_owned())
+                                    };
+                                let source = Glob::new(&source)
                                     .with_context(|| {
                                         format!(
                                             "can not compile glob pattern for redirect source: {}",
@@ -284,6 +322,7 @@ impl Settings {
 
                                 let status_code = redirects_entry.kind.to_owned() as u16;
                                 redirects_vec.push(Redirects {
+                                    host,
                                     source,
                                     destination: redirects_entry.destination.to_owned(),
                                     kind: StatusCode::from_u16(status_code).with_context(|| {

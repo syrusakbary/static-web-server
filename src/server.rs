@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot::Receiver;
 
 use crate::handler::{RequestHandler, RequestHandlerOpts};
-#[cfg(any(unix, windows))]
+#[cfg(not(target_os = "wasi"))]
 use crate::signals;
 #[cfg(feature = "tls")]
 use crate::tls::{TlsAcceptor, TlsConfigBuilder};
@@ -36,7 +36,11 @@ impl Server {
         };
         let max_blocking_threads = opts.general.max_blocking_threads;
 
-        Ok(Server { opts, worker_threads, max_blocking_threads })
+        Ok(Server {
+            opts,
+            worker_threads,
+            max_blocking_threads,
+        })
     }
 
     /// Build and run the multi-thread `Server` as standalone.
@@ -62,7 +66,7 @@ impl Server {
         F: FnOnce(),
     {
         tracing::debug!(%self.worker_threads, "initializing tokio runtime with multi thread scheduler");
-        
+
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(self.worker_threads)
             .max_blocking_threads(self.max_blocking_threads)
@@ -96,8 +100,9 @@ impl Server {
 
         // Config file option
         if let Some(config_file) = general.config_file {
+            #[cfg(not(target_family = "wasm"))]
             let config_file = helpers::adjust_canonicalization(config_file);
-            tracing::info!("config file: {}", config_file);
+            tracing::info!("config file: {:?}", config_file);
         }
 
         // Determine TCP listener either file descriptor or TCP socket
@@ -142,7 +147,10 @@ impl Server {
         tracing::info!("runtime worker threads: {}", threads);
 
         // Maximum number of blocking threads
-        tracing::info!("runtime max blocking threads: {}", general.max_blocking_threads);
+        tracing::info!(
+            "runtime max blocking threads: {}",
+            general.max_blocking_threads
+        );
 
         // Security Headers option
         let security_headers = general.security_headers;
